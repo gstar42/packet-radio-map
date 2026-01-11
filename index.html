@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Map</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100vh;
+        }
+        
+        .info-window {
+            padding: 10px;
+            max-width: 200px;
+        }
+        
+        .info-window h3 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+        }
+        
+        .info-window p {
+            margin: 0;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .btn {
+            background: white;
+            border: 2px solid #4285f4;
+            border-radius: 4px;
+            padding: 12px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transition: all 0.2s;
+        }
+        
+        .btn:hover {
+            background: #4285f4;
+            color: white;
+        }
+        
+        .frequency-display {
+            background: white;
+            border: 2px solid #4285f4;
+            border-radius: 4px;
+            padding: 8px 12px;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .frequency-display:hover {
+            background: #f0f0f0;
+        }
+        
+        .modal {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            max-width: 400px;
+            z-index: 1000;
+        }
+        
+        .modal.active {
+            display: block;
+        }
+        
+        .modal h2 {
+            margin: 0 0 16px 0;
+            font-size: 20px;
+        }
+        
+        .modal p {
+            margin: 8px 0;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .modal .close-btn {
+            margin-top: 16px;
+            width: 100%;
+        }
+        
+        .overlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 999;
+        }
+        
+        .overlay.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="controls">
+        <button class="frequency-display" id="freq-display">Current: <span id="freq-label">2 meter</span></button>
+        <button class="btn" id="freq-btn">Switch to 220</button>
+        <button class="btn" id="info-btn">Map Info</button>
+    </div>
+    
+    <div class="overlay" id="overlay"></div>
+    <div class="modal" id="info-modal">
+        <h2>Map Information</h2>
+        <p id="modal-content"></p>
+        <button class="btn close-btn" id="close-modal">Close</button>
+    </div>
+
+    <script>
+        // Data tables for 2 meter frequency
+        const places2m = [
+            { id: 1, name: "HSPLR: Los Robles Hospital Main", location: { lat: 34.209, lng: -118.883 }, info: "PBBS=HSPLR NODE=HSPLRN GATE=HSPLRG" },
+            { id: 2, name: "ECSS: East County Sheriff Station", location: { lat: 34.248 , lng: -118.835 }, info: "PBBS=ECSS NODE=ECSSN GATE=ECSSG" },
+            { id: 3, name: "TOEOC: Thousand Oaks City Hall", location: { lat: 34.175, lng: -118.848 }, 
+			info: "PBBS=TOEOC NODE=TOEOCN GATE=TOEOCG" },
+            { id: 4, name: "CWEOC: Calleguas Municipal Water District", location: { lat: 34.244, lng: -118.827 }, 
+			info: "PBBS=CWEOC NODE=CWEOCN GATE=CWEOCG" },
+            { id: 5, name: "HSPLRE: Los Robles Hospital East", location: { lat: 34.155, lng: -118.816 }, info: "PBBS=HSPLRE NODE=HSLREN GATE=HSLREG" },
+            { id: 6, name: "CLUEOC: Cal Lutheran EOC", location: { lat: 34.228, lng: -118.881 }, info: "PBBS=CLUEOC NODE=CLUN GATE=CLUG" },
+			{ id: 7, name: "OPMC: Medea Creek School", location: { lat: 34.184, lng: -118.764 }, info: "PBBS=OPMC NODE=OPMCN GATE=n/a" },
+			{ id: 8, name: "RASNOW: Rasnow Peak Packet Node ", location: { lat: 34.166, lng: -118.907 }, info: "PBBS=n/a NODE=RASNOW GATE=RASNOG" },
+			{ id: 9, name: "SOUTH: South Mountain Packet Node", location: { lat: 34.333, lng: -119.018 }, info: "PBBS=n/a NODE=SOUTH GATE=SOUTHG" }
+        ];
+        
+        const connections2m = [
+            { from: 1, to: 2, info: "145.050 MHz" },
+            { from: 1, to: 3, info: "145.050 MHz" },
+            { from: 2, to: 3, info: "145.050 MHz" },
+			{ from: 2, to: 4, info: "145.050 MHz" },
+			{ from: 2, to: 5, info: "145.050 MHz" },
+			{ from: 2, to: 6, info: "145.050 MHz" },
+			{ from: 2, to: 7, info: "145.050 MHz" },
+			{ from: 3, to: 5, info: "145.050 MHz" },
+			{ from: 3, to: 6, info: "145.050 MHz" },
+			{ from: 3, to: 7, info: "145.050 MHz" },
+			{ from: 8, to: 1, info: "145.050 MHz" },
+            { from: 8, to: 2, info: "145.050 MHz" },
+            { from: 8, to: 3, info: "145.050 MHz" },
+            { from: 8, to: 9, info: "145.050 MHz" },
+            { from: 2, to: 9, info: "145.050 MHz" }
+        ];
+        
+        // Data tables for 220 frequency
+        const places220 = [
+             { id: 1, name: "HSPLR: Los Robles Hospital Main", location: { lat: 34.209, lng: -118.883 }, info: "PBBS=HSPLR NODE=HSPLRN GATE=HSPLRG" },
+            { id: 2, name: "ECSS: East County Sheriff Station", location: { lat: 34.248 , lng: -118.835 }, info: "PBBS=ECSS NODE=ECSSN GATE=ECSSG" },
+            { id: 3, name: "TOEOC: Thousand Oaks City Hall", location: { lat: 34.175, lng: -118.848 }, 
+			info: "PBBS=TOEOC NODE=TOEOCN GATE=TOEOCG" },
+            { id: 4, name: "CWEOC: Calleguas Municipal Water District", location: { lat: 34.244, lng: -118.827 }, 
+			info: "PBBS=CWEOC NODE=CWEOCN GATE=CWEOCG" },
+            { id: 5, name: "HSPLRE: Los Robles Hospital East", location: { lat: 34.155, lng: -118.816 }, info: "PBBS=HSPLRE NODE=HSLREN GATE=HSLREG" },
+            { id: 6, name: "CLUEOC: Cal Lutheran EOC", location: { lat: 34.228, lng: -118.881 }, info: "PBBS=CLUEOC NODE=CLUN GATE=CLUG" },
+			{ id: 7, name: "RASNOW: Rasnow Peak Packet Node ", location: { lat: 34.166, lng: -118.907 }, info: "PBBS=n/a NODE=RAS220 GATE=RASNOG" },
+			{ id: 8, name: "SOUTH: South Mountain Packet Node", location: { lat: 34.333, lng: -119.018 }, info: "PBBS=n/a NODE=SOUTH GATE=SOUTHG" }
+        ];
+        
+        const connections220 = [
+			{ from: 1, to: 2, info: "223.580 MHz" },
+            { from: 1, to: 3, info: "223.580 MHz" },
+            { from: 2, to: 3, info: "223.580 MHz" },
+			{ from: 2, to: 4, info: "223.580 MHz" },
+			{ from: 2, to: 5, info: "223.580 MHz" },
+			{ from: 2, to: 6, info: "223.580 MHz" },
+			{ from: 3, to: 5, info: "223.580 MHz" },
+			{ from: 3, to: 6, info: "223.580 MHz" },
+            { from: 7, to: 1, info: "223.580 MHz" },
+            { from: 7, to: 2, info: "223.580 MHz" },
+            { from: 7, to: 3, info: "223.580 MHz" },
+            { from: 7, to: 8, info: "223.580 MHz" },
+            { from: 2, to: 8, info: "223.580 MHz" }
+		];
+        
+        let map;
+        let markers = [];
+        let lines = [];
+        let currentFreq = '2m';
+        let infoWindow;
+        let lastDisplayClickTime = 0;
+        
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: 34.220, lng: -118.830 },
+                zoom: 12,
+                mapId: 'GS_PACKET_MAP_ID'
+            });
+            
+            infoWindow = new google.maps.InfoWindow();
+            
+            // Close info window when clicking on the map
+            map.addListener('click', () => {
+                infoWindow.close();
+            });
+            
+            loadMap('2m');
+        }
+        
+        function clearMap() {
+            markers.forEach(m => m.map = null);
+            lines.forEach(l => l.setMap(null));
+            markers = [];
+            lines = [];
+        }
+        
+        function loadMap(freq) {
+            clearMap();
+            
+            const places = freq === '2m' ? places2m : places220;
+            const connections = freq === '2m' ? connections2m : connections220;
+            
+            // Create markers
+            places.forEach(place => {
+                // Create SVG element for the tower icon
+                const svgIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svgIcon.setAttribute('width', '24');
+                svgIcon.setAttribute('height', '32');
+                svgIcon.setAttribute('viewBox', '0 0 24 32');
+                
+                const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                
+                // Vertical line
+                const vertical = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                vertical.setAttribute('x1', '12');
+                vertical.setAttribute('y1', '2');
+                vertical.setAttribute('x2', '12');
+                vertical.setAttribute('y2', '30');
+                vertical.setAttribute('stroke', '#000000');
+                vertical.setAttribute('stroke-width', '2');
+                
+                // Top horizontal line
+                const horizontal1 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                horizontal1.setAttribute('x1', '4');
+                horizontal1.setAttribute('y1', '4');
+                horizontal1.setAttribute('x2', '20');
+                horizontal1.setAttribute('y2', '4');
+                horizontal1.setAttribute('stroke', '#000000');
+                horizontal1.setAttribute('stroke-width', '2');
+                
+                // Second horizontal line
+                const horizontal2 = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                horizontal2.setAttribute('x1', '4');
+                horizontal2.setAttribute('y1', '8');
+                horizontal2.setAttribute('x2', '20');
+                horizontal2.setAttribute('y2', '8');
+                horizontal2.setAttribute('stroke', '#000000');
+                horizontal2.setAttribute('stroke-width', '2');
+                
+                g.appendChild(vertical);
+                g.appendChild(horizontal1);
+                g.appendChild(horizontal2);
+                svgIcon.appendChild(g);
+                
+                const marker = new google.maps.marker.AdvancedMarkerElement({
+                    position: place.location,
+                    map: map,
+                    title: place.name,
+                    content: svgIcon
+                });
+                
+                marker.addListener('click', () => {
+                    infoWindow.setContent(`
+                        <div class="info-window">
+                            <h3>${place.name}</h3>
+                            <p>${place.info}</p>
+                        </div>
+                    `);
+                    infoWindow.open(map, marker);
+                });
+                
+                markers.push(marker);
+            });
+            
+            // Create connection lines
+            connections.forEach(conn => {
+                const fromPlace = places.find(p => p.id === conn.from);
+                const toPlace = places.find(p => p.id === conn.to);
+                
+                if (fromPlace && toPlace) {
+                    const line = new google.maps.Polyline({
+                        path: [fromPlace.location, toPlace.location],
+                        geodesic: true,
+                        strokeColor: '#FF0000',
+                        strokeOpacity: 0.7,
+                        strokeWeight: 3,
+                        map: map
+                    });
+                    
+                    line.addListener('click', (e) => {
+                        infoWindow.setContent(`
+                            <div class="info-window">
+                                <h3>Connection</h3>
+                                <p>${fromPlace.name} ↔ ${toPlace.name}</p>
+                                <p>${conn.info}</p>
+                            </div>
+                        `);
+                        infoWindow.setPosition(e.latLng);
+                        infoWindow.open(map);
+                    });
+                    
+                    lines.push(line);
+                }
+            });
+        }
+        
+        // Event listeners
+        document.getElementById('freq-display').addEventListener('click', () => {
+            const now = Date.now();
+            
+            // Check for double click (within 500ms)
+            if (now - lastDisplayClickTime < 500) {
+                infoWindow.setContent(`
+                    <div class="info-window">
+                        <p><strong>Author:</strong> K6GPS</p>
+                        <p><strong>Date:</strong> 20260111</p>
+                    </div>
+                `);
+                infoWindow.setPosition({ lat: 34.220, lng: -118.830 });
+                infoWindow.open(map);
+                lastDisplayClickTime = 0; // Reset after showing easter egg
+                return;
+            }
+            
+            lastDisplayClickTime = now;
+            // Single click does nothing
+        });
+        
+        document.getElementById('freq-btn').addEventListener('click', () => {
+            currentFreq = currentFreq === '2m' ? '220' : '2m';
+            const freqLabel = currentFreq === '2m' ? '2 meter' : '220';
+            const otherFreq = currentFreq === '2m' ? '220' : '2 meter';
+            
+            document.getElementById('freq-label').textContent = freqLabel;
+            document.getElementById('freq-btn').textContent = `Switch to ${otherFreq}`;
+            
+            loadMap(currentFreq);
+        });
+        
+        document.getElementById('info-btn').addEventListener('click', () => {
+            const freqName = currentFreq === '2m' ? '2 Meter' : '220 MHz';
+            const places = currentFreq === '2m' ? places2m : places220;
+            const connections = currentFreq === '2m' ? connections2m : connections220;
+            
+            document.getElementById('modal-content').innerHTML = `
+                <strong>Current Frequency:</strong> ${freqName}<br>
+                <strong>Total Stations:</strong> ${places.length}<br>
+                <strong>Total Connections:</strong> ${connections.length}<br><br>
+                This map displays Ventura County ACS Area 2 packet radio stations and their network connections.
+                Click on markers to view station details, or click on lines to view connection information.
+            `;
+            document.getElementById('overlay').classList.add('active');
+            document.getElementById('info-modal').classList.add('active');
+        });
+        
+        document.getElementById('close-modal').addEventListener('click', () => {
+            document.getElementById('overlay').classList.remove('active');
+            document.getElementById('info-modal').classList.remove('active');
+        });
+        
+        document.getElementById('overlay').addEventListener('click', () => {
+            document.getElementById('overlay').classList.remove('active');
+            document.getElementById('info-modal').classList.remove('active');
+        });
+    </script>
+    
+    <script async defer
+        src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB41DRUbKWJHPxaFjMAwdrzWzbVKartNGg&callback=initMap&libraries=marker">
+    </script>
+</body>
+</html>
